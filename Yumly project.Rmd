@@ -70,10 +70,23 @@ ingredientsDTM <- as.data.frame(as.matrix(ingredientsMatirx))
 str(ingredientsDTM)
 
 #adding DTM back to train data frame
-train_new <- data.frame(train,ingredientsDTM)
+train_new <- data.frame(train,ingredientsDTM) 
+
 str(train_new)
 
 x <- filter(train_new,train_new$apple==1)
 x[1:2]
 
+```
+# Applying SVD 
+```{r}
+# creating the variable matrix
+train_SVD_data <- train_new %>% arrange(cuisine) %>% select(5:ncol(train_new)) 
+str(train_SVD_data)
+
+train_SVD <- svd(train_SVD_data)
+d <- train_SVD$d
+u <- train_SVD$u
+v <- train_SVD$v  
+top_n(x = data.frame(d),n = 100)
 ```
