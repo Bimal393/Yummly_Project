@@ -148,17 +148,44 @@ train_SVD_data <- train_new %>% arrange(cuisine) %>% select(4:ncol(train_new))
 str(train_SVD_data)
 
 train_SVD <- svd(train_SVD_data)
-d <- diag(train_SVD$d)
+d <- train_SVD$d
 u <- train_SVD$u
 v <- train_SVD$v  
-top_n(x = data.frame(d),n = 300)
+top_n(x = data.frame(d),n = 500) # d for 300 is 16.89 
 
-us <- as.matrix(u[, 1:300])
-vs <- as.matrix(v[, 1:300])
-ds <- as.matrix(d[1:300, 1:300])
-ls <- us %*% ds %*% t(vs)
+# Making diagonal matrix for values < 10 as 0
+d <- d[d < 10] <- 0
+
+
+#us <- as.matrix(u[, 1:300])
+#vs <- as.matrix(v[, 1:300])
+ds <- diag(x = d,nrow = 2670,ncol = 2670)
+ls <- u %*% ds %*% t(v)
 ls <- as.data.frame(ls)
+names(ls) <- names(train_SVD_data)
+str(ls)
 
+# adding Cuisine back.
+ls$cuisine <- as.factor(train_new$cuisine)
+str(ls)
+
+# Creating Model
+library(caret)
+inTrain2 <- createDataPartition(y = ls$cuisine, p = 0.6, list = FALSE)
+training2 <- ls[inTrain1,]
+testing2 <- ls[-inTrain1,]
+
+#CART
+library(rpart)
+library(rpart.plot)
+set.seed(6000)
+cartModelFit2 <- rpart(cuisine ~ ., data = training2, method = "class")
+## Plot the tree
+prp(cartModelFit2)
+# Predict 
+cartPredict2 <- predict(cartModelFit2, newdata = testing2, type = "class")
+cartCM2 <- confusionMatrix(cartPredict2, testing2$cuisine)
+cartCM2
 ```
 
 
