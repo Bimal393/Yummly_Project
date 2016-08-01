@@ -1,0 +1,165 @@
+---
+title: "Yummly project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##loading Libraries
+
+```{r}
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(reshape2)
+library(tm)
+```
+## loading Data 
+
+```{r}
+setwd("C:/Users/Bimal/Desktop/Data Science/Slide Rule/Yummly Data")
+train_data <- fromJSON(txt = "train.json",flatten = TRUE)
+train <- tbl_df(train_data)
+train
+nrow(train)
+
+```
+
+## Freq of cuisines
+
+```{r, echo=FALSE}
+ggplot(train,aes(cuisine)) + geom_bar()
+```
+
+```{r}
+train_cuisine_sum <- train %>% 
+            group_by(cuisine) %>% 
+              summarise(number = n()) %>% 
+                arrange(number)
+train_cuisine_sum
+```
+
+# Ingredients Analysis
+```{r}
+# Ingredients 
+x <- rbind(train$ingredients)
+unique_ingredients <- data_frame(unique(sort(unlist(train$ingredients))))
+unique_ingredients
+
+```
+# Using Corpus
+```{r}
+library(tm)
+ingredients <- Corpus(VectorSource(train$ingredients))
+ingredients
+ingredients <- tm_map(ingredients, removeNumbers)
+removeBrackets <- content_transformer(function(x){gsub(pattern = "\\(|\\)|,",replacement = " ",x)})
+ingredients <- tm_map(ingredients,removeBrackets)
+ingredients <- tm_map(ingredients,removePunctuation)
+ingredients <- tm_map(ingredients, stemDocument)
+ingredients <- tm_map(ingredients, stripWhitespace)
+
+ingredientsMatirx <- DocumentTermMatrix(ingredients)
+ingredientsMatirx
+
+#Converting Corpus matrix into df
+ingredientsDTM <- as.data.frame(as.matrix(ingredientsMatirx))
+str(ingredientsDTM)
+
+#adding DTM back to train data frame
+train_new <- data.frame(train,ingredientsDTM) 
+
+str(train_new)
+
+x <- filter(train_new,train_new$apple==1)
+x[1:2]
+
+```
+## Modelling {.tabset .tabset-fade .tabset-pills}
+
+### without SVD removing the least used recipies.
+```{r}
+sparse <- removeSparseTerms(ingredientsMatirx, 0.99)
+sparse
+
+#Converting Corpus matrix into df
+ingredientsDTM_Sparse <- as.data.frame(as.matrix(sparse))
+str(ingredientsDTM_Sparse)
+
+ingredientsDTM_Sparse$cuisine <- as.factor(train$cuisine)
+str(ingredientsDTM_Sparse)
+
+ingredientsDTM_Cuisine <- ingredientsDTM
+ingredientsDTM_Cuisine$cuisine <- as.factor(train$cuisine)
+str(ingredientsDTM_Cuisine)
+
+# Creating Model
+library(caret)
+inTrain <- createDataPartition(y = ingredientsDTM_Sparse$cuisine, p = 0.6, list = FALSE)
+training <- ingredientsDTM_Sparse[inTrain,]
+testing <- ingredientsDTM_Sparse[-inTrain,]
+
+#CART
+library(rpart)
+library(rpart.plot)
+set.seed(6000)
+cartModelFit <- rpart(cuisine ~ ., data = training, method = "class")
+## Plot the tree
+prp(cartModelFit)
+# Predict 
+cartPredict <- predict(cartModelFit, newdata = testing, type = "class")
+cartCM <- confusionMatrix(cartPredict, testing$cuisine)
+cartCM
+```
+###Modelling without SVD and using all recipies
+```{r}
+ingredientsDTM_Cuisine <- ingredientsDTM
+ingredientsDTM_Cuisine$cuisine <- as.factor(train$cuisine)
+str(ingredientsDTM_Cuisine)
+
+# Creating Model
+library(caret)
+inTrain1 <- createDataPartition(y = ingredientsDTM_Cuisine$cuisine, p = 0.6, list = FALSE)
+training1 <- ingredientsDTM_Cuisine[inTrain1,]
+testing1 <- ingredientsDTM_Cuisine[-inTrain1,]
+
+#CART
+library(rpart)
+library(rpart.plot)
+set.seed(6000)
+cartModelFit1 <- rpart(cuisine ~ ., data = training1, method = "class")
+## Plot the tree
+prp(cartModelFit1)
+# Predict 
+cartPredict1 <- predict(cartModelFit1, newdata = testing1, type = "class")
+cartCM1 <- confusionMatrix(cartPredict1, testing1$cuisine)
+cartCM1
+```
+
+
+###With SVD 
+```{r}
+# creating the variable matrix
+train_SVD_data <- train_new %>% arrange(cuisine) %>% select(4:ncol(train_new)) 
+str(train_SVD_data)
+
+train_SVD <- svd(train_SVD_data)
+d <- diag(train_SVD$d)
+u <- train_SVD$u
+v <- train_SVD$v  
+top_n(x = data.frame(d),n = 300)
+
+us <- as.matrix(u[, 1:300])
+vs <- as.matrix(v[, 1:300])
+ds <- as.matrix(d[1:300, 1:300])
+ls <- us %*% ds %*% t(vs)
+ls <- as.data.frame(ls)
+
+```
+
+
+
