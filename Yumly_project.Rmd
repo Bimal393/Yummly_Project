@@ -1,5 +1,5 @@
 ---
-title: "Yummly project"
+title: "Yummly_project"
 output: html_document
 ---
 
@@ -7,7 +7,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-##loading Libraries
+##loading libraries
 
 ```{r}
 library(jsonlite)
@@ -21,10 +21,16 @@ library(tm)
 ## loading Data 
 
 ```{r}
+#setting the working directory
 setwd("C:/Users/Bimal/Desktop/Data Science/Slide Rule/Yummly Data")
+# loading the train dataset using the Json library
 train_data <- fromJSON(txt = "train.json",flatten = TRUE)
+test_data <- fromJSON(txt = "test.json",flatten = TRUE)
+#Converting the data to tbl_df format in dplyr.
 train <- tbl_df(train_data)
 train
+test <- tbl_df(train_data)
+test
 nrow(train)
 
 ```
@@ -32,10 +38,13 @@ nrow(train)
 ## Freq of cuisines
 
 ```{r, echo=FALSE}
+# Trying the understand the cuisines present and their frequency
 ggplot(train,aes(cuisine)) + geom_bar()
+#We can see from the graph that the train dataset has lots of Italian cuisines followed by Mexican and southern_us
 ```
 
 ```{r}
+# understanding cuisines and their frequency in data form
 train_cuisine_sum <- train %>% 
             group_by(cuisine) %>% 
               summarise(number = n()) %>% 
@@ -43,63 +52,88 @@ train_cuisine_sum <- train %>%
 train_cuisine_sum
 ```
 
-# Ingredients Analysis
+# Data cleaning
 ```{r}
-# Ingredients 
+# trying to identify any issues with the ingredients
 x <- rbind(train$ingredients)
 unique_ingredients <- data_frame(unique(sort(unlist(train$ingredients))))
-unique_ingredients
+unique_ingredients #ingredients data doesn’t look clean, words are identical but not same. For example, same data is represented lower cases in some cases and upper cases in other (braeburn apple/Braeburn Apple).
 
 ```
-# Using Corpus
+# Cleaning data Using Corpus
 ```{r}
-library(tm)
-ingredients <- Corpus(VectorSource(train$ingredients))
-ingredients
+library(SnowballC)
+ingredients <- Corpus(VectorSource(train$ingredients)) # Using Corpus in tm package and to create Document Matrix.
+# Converting all the text to lower case
+ingredients <- tm_map(ingredients,content_transformer(tolower))
+# removing the Quantity from the ingrdients.
 ingredients <- tm_map(ingredients, removeNumbers)
 removeBrackets <- content_transformer(function(x){gsub(pattern = "\\(|\\)|,",replacement = " ",x)})
-ingredients <- tm_map(ingredients,removeBrackets)
+ingredients <- tm_map(ingredients,removeBrackets)# Converting the list into Corpus vector resulted in brackets in list so removing them by creting the content transformer remove bracket function. 
+# removing the punctuations
 ingredients <- tm_map(ingredients,removePunctuation)
+#Removing common word endings like(-es,-s)
 ingredients <- tm_map(ingredients, stemDocument)
+# Stripping all the whitespaces
 ingredients <- tm_map(ingredients, stripWhitespace)
-
+# Converting ingredinets into a Document matrix 
 ingredientsMatirx <- DocumentTermMatrix(ingredients)
 ingredientsMatirx
 
 #Converting Corpus matrix into df
 ingredientsDTM <- as.data.frame(as.matrix(ingredientsMatirx))
-str(ingredientsDTM)
 
-#adding DTM back to train data frame
-train_new <- data.frame(train,ingredientsDTM) 
-
-str(train_new)
-
-x <- filter(train_new,train_new$apple==1)
-x[1:2]
 
 ```
-## Modelling {.tabset .tabset-fade .tabset-pills}
-
-### without SVD removing the least used recipies.
+# Exploring data
 ```{r}
+
+#Organizing ingredients by thier frequency
+freq <- colSums(as.matrix(ingredientsMatirx))
+length(freq)
+
+# Ordering them in order
+freq_order <- order(freq)
+freq[head(freq_order)]
+freq[tail(freq_order)]
+
+# Visualizing data
+freq_df <- data.frame(word = names(freq), freq = freq)
+head(freq_df)#we can observe that the Italian is highest in number followed by Mexican and southern us
+# Plotting terms which appear more than 10,000 times
+ggplot(subset(freq_df, freq >10000), aes(x = word, y = freq)) + geom_bar(stat = 'identity')# we can observe that pepper, salt ,oil are the most used ingredients
+
+library(wordcloud)
+#PLotting on word cloud
+wordcloud(names(freq), freq, min.freq = 2500, scale = c(6, .1), colors = brewer.pal(4, "BuPu"))
+# Plotting most 5000 used words
+wordcloud(names(freq), freq, max.words = 5000, scale = c(6, .1), colors = brewer.pal(6, 'Dark2'))
+
+```
+
+
+## Modeling {.tabset .tabset-fade .tabset-pills}
+
+### Using CART removing the least used recipies.
+```{r}
+#only keep terms that appear in 1% or more of the recipes.
 sparse <- removeSparseTerms(ingredientsMatirx, 0.99)
 sparse
 
 #Converting Corpus matrix into df
 ingredientsDTM_Sparse <- as.data.frame(as.matrix(sparse))
-str(ingredientsDTM_Sparse)
-
+dim(ingredientsDTM_Sparse)
 ingredientsDTM_Sparse$cuisine <- as.factor(train$cuisine)
-str(ingredientsDTM_Sparse)
 
 ingredientsDTM_Cuisine <- ingredientsDTM
 ingredientsDTM_Cuisine$cuisine <- as.factor(train$cuisine)
-str(ingredientsDTM_Cuisine)
+
 
 # Creating Model
 library(caret)
-inTrain <- createDataPartition(y = ingredientsDTM_Sparse$cuisine, p = 0.6, list = FALSE)
+
+# Partitioning the data with 75% in train
+inTrain <- createDataPartition(y = ingredientsDTM_Sparse$cuisine, p = 0.75, list = FALSE)
 training <- ingredientsDTM_Sparse[inTrain,]
 testing <- ingredientsDTM_Sparse[-inTrain,]
 
@@ -114,16 +148,18 @@ prp(cartModelFit)
 cartPredict <- predict(cartModelFit, newdata = testing, type = "class")
 cartCM <- confusionMatrix(cartPredict, testing$cuisine)
 cartCM
+cartPredict_test <- predict(cartModelFit, newdata = testing, type = "class")
+# Not much accuracy as it's 41.39% , lets try using all recipies.
 ```
-###Modelling without SVD and using all recipies
+###Using CART & using all recipies
 ```{r}
 ingredientsDTM_Cuisine <- ingredientsDTM
 ingredientsDTM_Cuisine$cuisine <- as.factor(train$cuisine)
-str(ingredientsDTM_Cuisine)
-
+dim(ingredientsDTM_Cuisine)
 # Creating Model
 library(caret)
-inTrain1 <- createDataPartition(y = ingredientsDTM_Cuisine$cuisine, p = 0.6, list = FALSE)
+# Partitioning the data with 75% in train
+inTrain1 <- createDataPartition(y = ingredientsDTM_Cuisine$cuisine, p = 0.75, list = FALSE)
 training1 <- ingredientsDTM_Cuisine[inTrain1,]
 testing1 <- ingredientsDTM_Cuisine[-inTrain1,]
 
@@ -138,54 +174,67 @@ prp(cartModelFit1)
 cartPredict1 <- predict(cartModelFit1, newdata = testing1, type = "class")
 cartCM1 <- confusionMatrix(cartPredict1, testing1$cuisine)
 cartCM1
+
+# Accuracy is 42.97% ; Not much improvement when compared to the previous model, lets use the dimension reduction technique PCA 
 ```
-
-
-###With SVD 
+### Modeling with PCA
 ```{r}
-# creating the variable matrix
-train_SVD_data <- train_new %>% arrange(cuisine) %>% select(4:ncol(train_new)) 
-str(train_SVD_data)
+ingredientsDTM_Cuisine <- ingredientsDTM
+ingredientsDTM_Cuisine$cuisine <- as.factor(train$cuisine)
 
-train_SVD <- svd(train_SVD_data)
-d <- train_SVD$d
-u <- train_SVD$u
-v <- train_SVD$v  
-top_n(x = data.frame(d),n = 500) # d for 300 is 16.89 
+# Partitioning the data with 75% in train
+inTrain3 <- createDataPartition(y = ingredientsDTM_Cuisine$cuisine, p = 0.75, list = FALSE)
+training3 <- ingredientsDTM_Cuisine[inTrain3,]
+pca.training3 <- subset(training3,select = -c(cuisine))# removing the cuisine(dependent) column
+testing3 <- ingredientsDTM_Cuisine[-inTrain3,]
 
-# Making diagonal matrix for values < 10 as 0
-d <- d[d < 10] <- 0
+# Principle component Analysis
+prin_comp <- prcomp(pca.training3)
+names(prin_comp)
+dim(prin_comp$x)
+#standard deviation of each principal component
+std_dev <-prin_comp$sdev
+# Computing variance a higher variance implies more informaton is contained in that components.
+pr_var <- std_dev^2
+head(pr_var)
 
+# proportion of the variation
+prop_varex <- pr_var/sum(pr_var)
+head(prop_varex)
+#scree plot to understand the impact of principle componenets
+plot(prop_varex, xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",
+             type = "b")
+# cumulative scree plot to understand the impact of principle componenets
+plot(cumsum(prop_varex), xlab = "Principal Component",
+              ylab = "Cumulative Proportion of Variance Explained",
+              type = "b")
+# We observe after 150 principle components variance is almost constant.
 
-#us <- as.matrix(u[, 1:300])
-#vs <- as.matrix(v[, 1:300])
-ds <- diag(x = d,nrow = 2670,ncol = 2670)
-ls <- u %*% ds %*% t(v)
-ls <- as.data.frame(ls)
-names(ls) <- names(train_SVD_data)
-str(ls)
+#adding training data set with principle components
+training3_data <- data.frame(cuisine = training3$cuisine,prin_comp$x)
+# choosing first 150 principle components.
+training3_data <- training3_data[, 1:150]
 
-# adding Cuisine back.
-ls$cuisine <- as.factor(train_new$cuisine)
-str(ls)
-
-# Creating Model
+# CART
 library(caret)
-inTrain2 <- createDataPartition(y = ls$cuisine, p = 0.6, list = FALSE)
-training2 <- ls[inTrain1,]
-testing2 <- ls[-inTrain1,]
-
-#CART
 library(rpart)
 library(rpart.plot)
-set.seed(6000)
-cartModelFit2 <- rpart(cuisine ~ ., data = training2, method = "class")
-## Plot the tree
-prp(cartModelFit2)
+cartModelFit3 <- rpart(cuisine ~ ., data = training3_data, method = "class")
+prp(cartModelFit3)
+
+#transform test into PCA
+testing3_data <- predict(prin_comp,newdata = testing3)
+testing3_data <- as.data.frame(testing3_data)
+
+# Using only the first 150 principle componenets.
+testing3_data <- testing3_data[,1:150]
+
+
 # Predict 
-cartPredict2 <- predict(cartModelFit2, newdata = testing2, type = "class")
-cartCM2 <- confusionMatrix(cartPredict2, testing2$cuisine)
-cartCM2
+cartPredict3 <- predict(cartModelFit3, newdata = testing3_data,type = "class")
+cartCM3 <- confusionMatrix(cartPredict3,testing3$cuisine)
+cartCM3
 ```
 
 
